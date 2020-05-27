@@ -1,32 +1,77 @@
+const config = require('../utils/config')
 const blogRouter = require('express').Router()
+const jwt = require('jsonwebtoken')
 const Blog = require('../models/blog')
+const User = require('../models/user')
 
 // Returns all the blogs in database
-blogRouter.get('/', (request, response) => {
-    Blog.find({})
-      .then(blogs => {
-        response.json(blogs)
-      })
+blogRouter.get('/', async (request, response) => {
+    const blogs = await Blog.find({}).populate('user')
+    response.json(blogs.map(b => b.toJSON()))
 })
   
-// Adding a blog to database
-blogRouter.post('/', (request, response) => {
-const blog = new Blog(request.body)
 
-    blog.save()
-        .then(result => {
-        response.status(201).json(result)
-        })
+const getTokenFrom = request => {
+  const authorization = request.get("authorization")
+  if(authorization && authorization.toLowerCase().startsWith('bearer')){
+    return authorization.substring(7)
+  }
+  return null
+}
+
+// Adding a blog to database
+blogRouter.post('/', async (request, response) => {
+  const body = request.body
+  const token = getTokenFrom(request)
+
+  const decodedToken = jwt.verify(token, config.SECRET)
+  if(!token || !decodedToken.id){
+    return response.status(401).send({error: 'token missing or invalid'})
+  } 
+
+  const user = await User.findById(decodedToken.id)
+
+  const blog = new Blog({
+    title: body.title,
+    author: body.author,
+    url: body.url,
+    likes: body.likes,
+    user: user._id
+  })
+
+  const savedBlog = await blog.save()
+  user.blogs = user.blogs.concat(savedBlog._id)
+  await user.save()
+
+  response.json(savedBlog.toJSON())
 })
 
 // Deletes a blog in database
 blogRouter.delete('/:id', async (request, response) => {
-  try{
-    await Blog.findByIdAndRemove(request.params.id)    
-    response.status(204).end()
-  } catch(exception){
-    next(exception)
+  const token = getTokenFrom(request)
+
+  const decodedToken = jwt.verify(token, config.SECRET)
+  if(!token || !decodedToken.id){
+    return response.status(401).send({error: 'token missing or invalid'})
+  } 
+
+  const user = await User.findById(decodedToken.id)
+  console.log("USER", user)
+
+  const blog = await Blog.findOne({_id: request.params.id})
+  console.log("BLOG", blog)
+
+  if(user._id.toString() === blog.user.toString()){
+    try{
+      await Blog.findByIdAndRemove(request.params.id)    
+      response.status(204).end()
+    } catch(exception){
+      next(exception)
+    }
+  } else{
+    return response.status(401).send({error: "You do not have permission to delete this blog"})
   }
+
 })
 
 // Updates number of likes for specific blog
