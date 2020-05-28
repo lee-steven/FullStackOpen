@@ -7,6 +7,7 @@ usersRouter.get('/', async (request, response) => {
     const users = await User.find({}).populate('blogs')
     response.json(users.map(u => u.toJSON()))   
 })
+
 // Adds new user to database 
 usersRouter.post('/', async (request, response, next) => {
     const body = request.body
